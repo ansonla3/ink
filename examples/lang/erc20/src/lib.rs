@@ -31,26 +31,6 @@ use ink_core::{
 };
 use ink_lang::contract;
 
-/// Events deposited by the ERC20 token contract.
-#[derive(Encode, Decode)]
-enum Event {
-    Transfer {
-        from: Option<AccountId>,
-        to: Option<AccountId>,
-        value: Balance,
-    },
-    Approval {
-        owner: AccountId,
-        spender: AccountId,
-        value: Balance,
-    },
-}
-
-/// Deposits an ERC20 token event.
-fn deposit_event(event: Event) {
-    env::deposit_raw_event(&event.encode()[..])
-}
-
 contract! {
     /// The storage items for a typical ERC20 token implementation.
     struct Erc20 {
@@ -62,11 +42,14 @@ contract! {
         allowances: storage::HashMap<(AccountId, AccountId), Balance>,
     }
 
+    event Transfer2 { from: Option<AccountId>, to: Option<AccountId>, value: Balance }
+    event Approval { owner: AccountId, spender: AccountId, value: Balance }
+
     impl Deploy for Erc20 {
         fn deploy(&mut self, init_value: Balance) {
             self.total_supply.set(init_value);
             self.balances.insert(env.caller(), init_value);
-            deposit_event(Event::Transfer {
+            env.emit(Transfer2 {
                 from: None,
                 to: Some(env.caller()),
                 value: init_value
@@ -101,7 +84,15 @@ contract! {
 
         /// Transfers token from the sender to the `to` AccountId.
         pub(external) fn transfer(&mut self, to: AccountId, value: Balance) -> bool {
-            self.transfer_impl(env.caller(), to, value)
+            let success = self.transfer_impl(env.caller(), to, value);
+            if success {
+                env.emit(Transfer2 {
+                    from: Some(env.caller()),
+                    to: Some(to),
+                    value: value
+                });
+            }
+            success
         }
 
         /// Approve the passed AccountId to spend the specified amount of tokens
@@ -112,7 +103,7 @@ contract! {
                 return false
             }
             self.allowances.insert((owner, spender), value);
-            deposit_event(Event::Approval {
+            env.emit(Approval {
                 owner: owner,
                 spender: spender,
                 value: value
@@ -127,7 +118,15 @@ contract! {
                 return false
             }
             self.allowances.insert((from, env.caller()), allowance - value);
-            self.transfer_impl(from, to, value)
+            let success = self.transfer_impl(from, to, value);
+            if success {
+                env.emit(Transfer2 {
+                    from: Some(from),
+                    to: Some(to),
+                    value: value
+                });
+            }
+            success
         }
     }
 
@@ -153,11 +152,6 @@ contract! {
             }
             self.balances.insert(from, balance_from - value);
             self.balances.insert(to, balance_to + value);
-            deposit_event(Event::Transfer {
-                from: Some(from),
-                to: Some(to),
-                value: value
-            });
             true
         }
     }
